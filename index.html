@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FutoMini · Diario</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1108;
+    --paper: #f5f0e8;
+    --accent: #c8410a;
+    --accent2: #2a5f8f;
+    --cell-size: 54px;
+    --conflict-bg: #ffd0cc;
+    --given-bg: #e8e0cc;
+    --correct-bg: #c8f0cc;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 16px 48px;
+    background-image: repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(26,17,8,0.06) 31px, rgba(26,17,8,0.06) 32px);
+  }
+
+  header {
+    width: 100%; max-width: 560px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 2.5px solid var(--ink); padding-bottom: 10px; margin-bottom: 4px;
+  }
+  .masthead { font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 700; letter-spacing: -1px; }
+  .masthead span { color: var(--accent); font-style: italic; font-weight: 400; }
+  .date-line { font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0.05em; opacity: 0.6; }
+  .tagline { width: 100%; max-width: 560px; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.5; margin-bottom: 20px; font-weight: 500; }
+
+  .attempts-bar {
+    width: 100%; max-width: 560px;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+  }
+  .attempts-label { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--accent); font-weight: 500; }
+  .timer-display  { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--accent2); font-weight: 500; }
+  .attempt-dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); background: transparent; transition: background 0.3s; }
+  .dot.used    { background: var(--accent); border-color: var(--accent); }
+  .dot.success { background: #2d7a3a; border-color: #2d7a3a; }
+
+  .game-area { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  #status-bar { font-family: 'DM Mono', monospace; font-size: 0.75rem; letter-spacing: 0.05em; min-height: 18px; text-align: center; }
+
+  /* ── FUTO GRID ──
+     The grid is built as a CSS grid where:
+     - odd columns/rows = cells
+     - even columns/rows = inequality slots
+  */
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(5, var(--cell-size));
+    grid-template-rows:    repeat(5, var(--cell-size));
+    border: 2.5px solid var(--ink);
+    background: var(--ink);
+    gap: 1.5px;
+    touch-action: none;
+    position: relative;
+  }
+
+  .cell {
+    width: var(--cell-size); height: var(--cell-size);
+    background: var(--paper);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace; font-size: 1.4rem; font-weight: 500;
+    color: var(--ink); cursor: pointer;
+    position: relative; transition: background 0.12s;
+    user-select: none; -webkit-user-select: none;
+  }
+  .cell.given    { background: var(--given-bg); cursor: default; }
+  .cell.selected { background: #f0c060 !important; }
+  .cell.highlight{ background: #ede7d9; }
+  .cell.conflict { background: var(--conflict-bg); color: var(--accent); }
+  .cell.correct  { background: var(--correct-bg); }
+
+  /* notes */
+  .notes {
+    display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr);
+    width: 100%; height: 100%; padding: 2px; gap: 0;
+  }
+  .note-digit {
+    font-family: 'DM Mono', monospace; font-size: 0.52rem; color: var(--accent2);
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+
+  /* Inequality symbols — SVG overlay on top of grid borders */
+  #grid-wrap { position: relative; }
+  #grid-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  /* numpad */
+  .numpad { display: flex; gap: 8px; margin-top: 12px; }
+  .num-btn {
+    width: var(--cell-size); height: var(--cell-size);
+    font-family: 'DM Mono', monospace; font-size: 1.3rem; font-weight: 500;
+    border: 2px solid var(--ink); background: transparent; color: var(--ink);
+    cursor: pointer; transition: all 0.12s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .num-btn:hover { background: var(--ink); color: var(--paper); }
+  .num-btn.erase { color: var(--accent); border-color: var(--accent); }
+  .num-btn.erase:hover { background: var(--accent); color: white; }
+
+  /* controls */
+  .controls { display: flex; gap: 10px; width: 100%; justify-content: center; }
+  button {
+    font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 500;
+    letter-spacing: 0.06em; text-transform: uppercase; padding: 10px 20px;
+    border: 2px solid var(--ink); background: transparent; color: var(--ink);
+    cursor: pointer; transition: all 0.15s;
+  }
+  button:hover { background: var(--ink); color: var(--paper); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button.primary:hover { background: #a33208; border-color: #a33208; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button:disabled:hover { background: transparent; color: var(--ink); }
+  button.primary:disabled:hover { background: var(--accent); color: white; }
+  #btn-note { font-family: 'DM Mono', monospace; font-size: 0.72rem; letter-spacing: 0.04em; }
+  #btn-note.active { background: var(--accent2); border-color: var(--accent2); color: white; }
+  #btn-note.active:hover { background: #1a4a70; border-color: #1a4a70; }
+
+  /* overlays */
+  #result-overlay, #locked-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(26,17,8,0.88); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #result-overlay.show, #locked-overlay.show { display: flex; animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+  .result-card, .locked-card {
+    background: var(--paper); padding: 36px 44px; text-align: center;
+    border: 3px solid var(--ink); max-width: 360px; width: 90%;
+  }
+  .result-card .emoji-big { font-size: 3rem; margin-bottom: 8px; }
+  .result-card .big, .locked-card .big { font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .result-card .sub, .locked-card .sub { font-size: 0.85rem; opacity: 0.6; margin-bottom: 8px; }
+  .result-card .stat { font-family: 'DM Mono', monospace; font-size: 1rem; color: var(--accent); margin-bottom: 20px; }
+  .share-text, .locked-share {
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    background: rgba(26,17,8,0.06); padding: 12px; margin-bottom: 16px;
+    white-space: pre; line-height: 1.6; border: 1px solid rgba(26,17,8,0.15); text-align: left;
+  }
+  .share-btn { width: 100%; margin-bottom: 8px; }
+  .next-puzzle-info { font-family: 'DM Mono', monospace; font-size: 0.68rem; opacity: 0.5; margin-top: 12px; }
+  .countdown { font-family: 'DM Mono', monospace; font-size: 1.6rem; color: var(--accent); margin-bottom: 20px; }
+
+  @media (max-width: 480px) {
+    :root { --cell-size: 44px; }
+    .masthead { font-size: 1.5rem; }
+    .result-card, .locked-card { padding: 28px 24px; }
+  }
+  @media (max-width: 360px) {
+    :root { --cell-size: calc((100vw - 64px) / 5); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">Futo<span>mini</span></div>
+  <div class="date-line" id="date-display"></div>
+</header>
+<div class="tagline">futoshiki 5×5 · desigualdades · cada día</div>
+
+<div class="attempts-bar">
+  <span class="attempts-label" id="attempts-label">INTENTO 1 / 3</span>
+  <span class="timer-display"  id="timer-display">0:00</span>
+  <div class="attempt-dots">
+    <div class="dot" id="dot-0"></div>
+    <div class="dot" id="dot-1"></div>
+    <div class="dot" id="dot-2"></div>
+  </div>
+</div>
+
+<div class="game-area">
+  <div id="status-bar"></div>
+  <div id="grid-wrap">
+    <div id="grid"></div>
+    <svg id="grid-overlay"></svg>
+  </div>
+  <div class="numpad" id="numpad"></div>
+  <div class="controls">
+    <button id="btn-note" onclick="toggleNoteMode()">✏ Nota</button>
+    <button class="primary" id="btn-check" onclick="checkAttempt()">Comprobar</button>
+  </div>
+</div>
+
+<div id="result-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="result-card">
+    <div class="emoji-big" id="r-emoji"></div>
+    <div class="big"        id="r-title"></div>
+    <div class="sub"        id="r-sub"></div>
+    <div class="stat"       id="r-stat"></div>
+    <div class="share-text" id="r-share"></div>
+    <button class="primary share-btn" onclick="copyShare()">Copiar resultado 📋</button>
+    <button onclick="document.getElementById('result-overlay').classList.remove('show')">Ver puzzle ↓</button>
+    <div class="next-puzzle-info" id="next-puzzle-info"></div>
+  </div>
+</div>
+
+<div id="locked-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="locked-card">
+    <div class="big">Ya jugaste hoy</div>
+    <div class="sub">El próximo puzzle en:</div>
+    <div class="countdown" id="countdown">--:--:--</div>
+    <div class="locked-share" id="locked-share"></div>
+    <button class="primary share-btn" onclick="copyShare()">Copiar resultado 📋</button>
+    <button onclick="document.getElementById('locked-overlay').classList.remove('show')">Ver puzzle ↓</button>
+  </div>
+</div>
+
+<script>
+const SIZE = 5;
+const MAX_ATTEMPTS = 3;
+
+// ══════════════════════════════════════════════════════════
+// SEEDED RNG
+// ══════════════════════════════════════════════════════════
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function dateToSeed(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+  return h >>> 0;
+}
+function seededShuffle(arr, rng) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ══════════════════════════════════════════════════════════
+// PUZZLE GENERATION
+// ══════════════════════════════════════════════════════════
+
+// Generate a valid Latin square (each 1-5 appears once per row and col)
+function generateSolution(rng) {
+  const board = Array.from({length: SIZE}, () => Array(SIZE).fill(0));
+  function solve(r, c) {
+    if (r === SIZE) return true;
+    const nr = c === SIZE - 1 ? r + 1 : r;
+    const nc = c === SIZE - 1 ? 0 : c + 1;
+    const digits = seededShuffle([1,2,3,4,5], rng);
+    for (const d of digits) {
+      if (isValidLatinSquare(board, r, c, d)) {
+        board[r][c] = d;
+        if (solve(nr, nc)) return true;
+        board[r][c] = 0;
+      }
+    }
+    return false;
+  }
+  solve(0, 0);
+  return board;
+}
+
+function isValidLatinSquare(board, r, c, d) {
+  for (let i = 0; i < SIZE; i++) {
+    if (board[r][i] === d) return false;
+    if (board[i][c] === d) return false;
+  }
+  return true;
+}
+
+// Count solutions given current clues (givens + inequalities)
+// Returns 0, 1, or 2 (stops at 2 for efficiency)
+function countSolutions(givens, ineqs, limit = 2) {
+  const board = Array.from({length: SIZE}, () => Array(SIZE).fill(0));
+  for (const [key, val] of Object.entries(givens)) {
+    const [r, c] = key.split(',').map(Number);
+    board[r][c] = val;
+  }
+  let count = 0;
+  function solve(pos) {
+    if (count >= limit) return;
+    if (pos === SIZE * SIZE) { count++; return; }
+    const r = Math.floor(pos / SIZE), c = pos % SIZE;
+    if (board[r][c] !== 0) { solve(pos + 1); return; }
+    for (let d = 1; d <= SIZE; d++) {
+      if (isValidCell(board, ineqs, r, c, d)) {
+        board[r][c] = d;
+        solve(pos + 1);
+        board[r][c] = 0;
+      }
+    }
+  }
+  solve(0);
+  return count;
+}
+
+function isValidCell(board, ineqs, r, c, d) {
+  // row & col uniqueness
+  for (let i = 0; i < SIZE; i++) {
+    if (i !== c && board[r][i] === d) return false;
+    if (i !== r && board[i][c] === d) return false;
+  }
+  // check inequalities involving (r,c)
+  for (const ineq of ineqs) {
+    const { r1, c1, r2, c2 } = ineq; // r1,c1 < r2,c2
+    if (r1 === r && c1 === c) {
+      const other = board[r2][c2];
+      if (other !== 0 && !(d < other)) return false;
+      if (other === 0 && d === SIZE) return false; // can't be satisfied
+    }
+    if (r2 === r && c2 === c) {
+      const other = board[r1][c1];
+      if (other !== 0 && !(other < d)) return false;
+      if (other === 0 && d === 1) return false;
+    }
+  }
+  return true;
+}
+
+function generatePuzzle(dateStr) {
+  const seed = dateToSeed(dateStr);
+  const rng  = mulberry32(seed);
+  const solution = generateSolution(rng);
+
+  // Build ALL possible inequalities from the solution
+  const allIneqs = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      // horizontal: (r,c) < (r,c+1)
+      if (c + 1 < SIZE) {
+        if (solution[r][c] < solution[r][c+1])
+          allIneqs.push({r1:r,c1:c,r2:r,c2:c+1,dir:'h'});
+        else
+          allIneqs.push({r1:r,c1:c+1,r2:r,c2:c,dir:'h'});
+      }
+      // vertical: (r,c) < (r+1,c)
+      if (r + 1 < SIZE) {
+        if (solution[r][c] < solution[r+1][c])
+          allIneqs.push({r1:r,c1:c,r2:r+1,c2:c,dir:'v'});
+        else
+          allIneqs.push({r1:r+1,c1:c,r2:r,c2:c,dir:'v'});
+      }
+    }
+  }
+
+  // Shuffle ineqs and greedily add until unique solution
+  const shuffled = seededShuffle(allIneqs, rng);
+  const activeIneqs = [];
+  let givens = {};
+
+  // Start with no clues — keep adding inequalities until unique
+  for (const ineq of shuffled) {
+    activeIneqs.push(ineq);
+    const n = countSolutions(givens, activeIneqs);
+    if (n === 1) break;
+  }
+
+  // If still not unique after all ineqs, add some givens
+  if (countSolutions(givens, activeIneqs) !== 1) {
+    const cells = seededShuffle(
+      Array.from({length:SIZE*SIZE},(_,i)=>[Math.floor(i/SIZE),i%SIZE]), rng
+    );
+    for (const [r,c] of cells) {
+      givens[`${r},${c}`] = solution[r][c];
+      if (countSolutions(givens, activeIneqs) === 1) break;
+    }
+  }
+
+  // Try removing inequalities while keeping uniqueness (minimize clues)
+  for (let i = activeIneqs.length - 1; i >= 0; i--) {
+    const without = [...activeIneqs.slice(0,i), ...activeIneqs.slice(i+1)];
+    if (countSolutions(givens, without) === 1) {
+      activeIneqs.splice(i, 1);
+    }
+  }
+
+  // Always add 2-3 given numbers as starting hints (spread across the grid)
+  const targetGivens = 2 + Math.floor(rng() * 2); // 2 or 3
+  const emptyCells = seededShuffle(
+    Array.from({length:SIZE*SIZE},(_,i)=>[Math.floor(i/SIZE),i%SIZE])
+      .filter(([r,c]) => !givens[`${r},${c}`]),
+    rng
+  );
+  // Pick cells that are spread out (no two in the same row or col)
+  const usedRows = new Set(), usedCols = new Set();
+  for (const [r,c] of emptyCells) {
+    if (usedRows.has(r) || usedCols.has(c)) continue;
+    givens[`${r},${c}`] = solution[r][c];
+    usedRows.add(r); usedCols.add(c);
+    if (usedRows.size >= targetGivens) break;
+  }
+
+  return { solution, givens, ineqs: activeIneqs };
+}
+
+// ══════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════
+let puzzle       = null;
+let todayKey     = '';
+let userGrid     = Array.from({length:SIZE},()=>Array(SIZE).fill(0));
+let notes        = Array.from({length:SIZE},()=>Array.from({length:SIZE},()=>new Set()));
+let selectedCell = null;
+let noteMode     = false;
+let attemptsUsed = 0;
+let attemptHistory = [];
+let gameOver     = false;
+let timerSecs    = 0;
+let timerInt     = null;
+let timerStarted = false;
+let _shareStr    = '';
+
+// ══════════════════════════════════════════════════════════
+// RENDER
+// ══════════════════════════════════════════════════════════
+function renderGrid() {
+  const el = document.getElementById('grid');
+  el.innerHTML = '';
+
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.dataset.r = r; div.dataset.c = c;
+      const key = `${r},${c}`;
+      if (puzzle.givens[key]) {
+        div.classList.add('given');
+        div.textContent = puzzle.givens[key];
+      } else {
+        div.addEventListener('click', () => selectCell(r, c));
+        div.addEventListener('touchend', e => { e.preventDefault(); selectCell(r, c); });
+      }
+      el.appendChild(div);
+    }
+  }
+
+  renderInequalitySVG();
+  document.addEventListener('keydown', handleKey);
+}
+
+function getCellMetrics() {
+  // Returns {cellW, cellH, borderW} where cellW/H is the full step (cell + gap)
+  // by measuring the actual DOM cells.
+  const c00 = document.querySelector('.cell[data-r="0"][data-c="0"]');
+  const c01 = document.querySelector('.cell[data-r="0"][data-c="1"]');
+  const c10 = document.querySelector('.cell[data-r="1"][data-c="0"]');
+  const wrapRect = document.getElementById('grid-wrap').getBoundingClientRect();
+  const r00 = c00.getBoundingClientRect();
+  const r01 = c01.getBoundingClientRect();
+  const r10 = c10.getBoundingClientRect();
+  return {
+    // offset of first cell relative to wrap
+    x0: r00.left - wrapRect.left,
+    y0: r00.top  - wrapRect.top,
+    // step from one cell center to next
+    stepX: (r01.left + r01.width/2) - (r00.left + r00.width/2),
+    stepY: (r10.top  + r10.height/2) - (r00.top  + r00.height/2),
+    // cell dimensions
+    w: r00.width,
+    h: r00.height,
+    wrapW: wrapRect.width,
+    wrapH: wrapRect.height,
+  };
+}
+
+function renderInequalitySVG() {
+  const svg = document.getElementById('grid-overlay');
+  requestAnimationFrame(() => {
+    const m = getCellMetrics();
+    svg.style.width  = m.wrapW + 'px';
+    svg.style.height = m.wrapH + 'px';
+    svg.innerHTML = '';
+    for (const ineq of puzzle.ineqs) {
+      renderOneIneq(svg, ineq, m, false);
+    }
+  });
+}
+
+function renderOneIneq(svg, ineq, m, conflict) {
+  const { r1, c1, r2, c2, dir } = ineq;
+  // Center of cell (r,c) in wrap coordinates:
+  // x = m.x0 + m.w/2 + c*m.stepX
+  // y = m.y0 + m.h/2 + r*m.stepY
+  // For H ineq: symbol sits on the shared border between (r1,c1) and (r1,c2)
+  // midpoint x = average of the two cell centers
+  // For V ineq: midpoint y = average of the two cell centers
+
+  const cx1 = m.x0 + m.w/2 + c1 * m.stepX;
+  const cy1 = m.y0 + m.h/2 + r1 * m.stepY;
+  const cx2 = m.x0 + m.w/2 + c2 * m.stepX;
+  const cy2 = m.y0 + m.h/2 + r2 * m.stepY;
+  const px = (cx1 + cx2) / 2;
+  const py = (cy1 + cy2) / 2;
+
+  // Background pill so symbol is readable over the grid line
+  const bgSize = Math.min(m.w, m.h) * 0.42;
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', px - bgSize/2);
+  bg.setAttribute('y', py - bgSize/2);
+  bg.setAttribute('width',  bgSize);
+  bg.setAttribute('height', bgSize);
+  bg.setAttribute('fill', conflict ? '#ffd0cc' : '#f5f0e8');
+  bg.setAttribute('rx', 2);
+  svg.appendChild(bg);
+
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('font-family', "'DM Mono', monospace");
+  text.setAttribute('font-size', Math.min(m.w, m.h) * 0.28);
+  text.setAttribute('font-weight', '700');
+  text.setAttribute('fill', conflict ? '#c8410a' : '#1a1108');
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('dominant-baseline', 'middle');
+  text.setAttribute('x', px);
+  text.setAttribute('y', py);
+
+  if (dir === 'h') {
+    // r1==r2, columns differ. c1<c2 means solution[r1][c1] < solution[r1][c2] → symbol '<'
+    text.textContent = c1 < c2 ? '<' : '>';
+  } else {
+    // c1==c2, rows differ. r1<r2 means solution[r1][c1] < solution[r2][c1] → smaller on top → '∧'
+    text.textContent = r1 < r2 ? '∧' : '∨';
+  }
+  svg.appendChild(text);
+}
+
+function refreshIneqColors() {
+  const svg = document.getElementById('grid-overlay');
+  const m   = getCellMetrics();
+  svg.innerHTML = '';
+  for (const ineq of puzzle.ineqs) {
+    const { r1, c1, r2, c2 } = ineq;
+    const v1 = puzzle.givens[`${r1},${c1}`] || userGrid[r1][c1];
+    const v2 = puzzle.givens[`${r2},${c2}`] || userGrid[r2][c2];
+    const conflict = v1 !== 0 && v2 !== 0 && !(v1 < v2);
+    renderOneIneq(svg, ineq, m, conflict);
+  }
+}
+
+function renderNumpad() {
+  const el = document.getElementById('numpad');
+  el.innerHTML = '';
+  for (let n = 1; n <= 5; n++) {
+    const btn = document.createElement('button');
+    btn.className = 'num-btn';
+    btn.textContent = n;
+    btn.addEventListener('click', () => enterNumber(n));
+    el.appendChild(btn);
+  }
+  const erase = document.createElement('button');
+  erase.className = 'num-btn erase';
+  erase.textContent = '✕';
+  erase.addEventListener('click', () => enterNumber(0));
+  el.appendChild(erase);
+}
+
+// ══════════════════════════════════════════════════════════
+// INTERACTION
+// ══════════════════════════════════════════════════════════
+function selectCell(r, c) {
+  if (gameOver) return;
+  startTimer();
+  const key = `${r},${c}`;
+  if (puzzle.givens[key]) return;
+  selectedCell = [r, c];
+  refreshHighlights();
+}
+
+function toggleNoteMode() {
+  noteMode = !noteMode;
+  const btn = document.getElementById('btn-note');
+  btn.classList.toggle('active', noteMode);
+}
+
+function enterNumber(n) {
+  if (!selectedCell || gameOver) return;
+  const [r, c] = selectedCell;
+
+  if (noteMode) {
+    if (n === 0) { notes[r][c].clear(); }
+    else if (notes[r][c].has(n)) notes[r][c].delete(n);
+    else notes[r][c].add(n);
+    userGrid[r][c] = 0;
+    renderNotes(r, c);
+    const el = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+    if (el) el.classList.add('selected');
+    saveState();
+    return;
+  }
+
+  notes[r][c].clear();
+  userGrid[r][c] = n;
+  saveState();
+  refreshHighlights();
+  updateConflicts();
+  refreshIneqColors();
+}
+
+function renderNotes(r, c) {
+  const el = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+  if (!el) return;
+  el.textContent = '';
+  const div = document.createElement('div');
+  div.className = 'notes';
+  for (let n = 1; n <= 5; n++) {
+    const span = document.createElement('span');
+    span.className = 'note-digit';
+    span.textContent = notes[r][c].has(n) ? n : '';
+    div.appendChild(span);
+  }
+  el.appendChild(div);
+}
+
+function handleKey(e) {
+  if (gameOver) return;
+  if (e.key >= '1' && e.key <= '5') { enterNumber(parseInt(e.key)); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') { enterNumber(0); return; }
+  if (!selectedCell) return;
+  const [r, c] = selectedCell;
+  const moves = { ArrowUp:[-1,0], ArrowDown:[1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] };
+  if (moves[e.key]) {
+    e.preventDefault();
+    let [nr, nc] = [r + moves[e.key][0], c + moves[e.key][1]];
+    while (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && puzzle.givens[`${nr},${nc}`]) {
+      nr += moves[e.key][0]; nc += moves[e.key][1];
+    }
+    if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE) selectCell(nr, nc);
+  }
+}
+
+function refreshHighlights() {
+  document.querySelectorAll('.cell').forEach(el => {
+    el.classList.remove('selected', 'highlight');
+    const r = +el.dataset.r, c = +el.dataset.c;
+    const key = `${r},${c}`;
+    if (!puzzle.givens[key]) {
+      if (userGrid[r][c]) el.textContent = userGrid[r][c];
+      else if (notes[r][c].size > 0) renderNotes(r, c);
+      else el.textContent = '';
+    }
+  });
+  if (!selectedCell) return;
+  const [sr, sc] = selectedCell;
+  document.querySelectorAll('.cell').forEach(el => {
+    if (el.classList.contains('given')) return;
+    const r = +el.dataset.r, c = +el.dataset.c;
+    if (r === sr && c === sc) el.classList.add('selected');
+    else if (r === sr || c === sc) el.classList.add('highlight');
+  });
+}
+
+function updateConflicts() {
+  document.querySelectorAll('.cell:not(.given)').forEach(el => {
+    el.classList.remove('conflict');
+    const r = +el.dataset.r, c = +el.dataset.c;
+    const val = userGrid[r][c];
+    if (!val) return;
+    if (cellHasConflict(r, c, val)) el.classList.add('conflict');
+  });
+}
+
+function cellHasConflict(r, c, val) {
+  // row & col duplicates
+  for (let i = 0; i < SIZE; i++) {
+    if (i !== c) { const v = puzzle.givens[`${r},${i}`] || userGrid[r][i]; if (v === val) return true; }
+    if (i !== r) { const v = puzzle.givens[`${i},${c}`] || userGrid[i][c]; if (v === val) return true; }
+  }
+  // inequalities
+  for (const ineq of puzzle.ineqs) {
+    const { r1, c1, r2, c2 } = ineq;
+    if (r1 === r && c1 === c) {
+      const other = puzzle.givens[`${r2},${c2}`] || userGrid[r2][c2];
+      if (other && !(val < other)) return true;
+    }
+    if (r2 === r && c2 === c) {
+      const other = puzzle.givens[`${r1},${c1}`] || userGrid[r1][c1];
+      if (other && !(other < val)) return true;
+    }
+  }
+  return false;
+}
+
+// ══════════════════════════════════════════════════════════
+// CHECK ATTEMPT
+// ══════════════════════════════════════════════════════════
+function checkAttempt() {
+  if (gameOver) return;
+  // all filled?
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++)
+      if (!puzzle.givens[`${r},${c}`] && !userGrid[r][c]) { flash('Completa el puzzle antes de comprobar'); return; }
+
+  const won = isSolved();
+  attemptsUsed++;
+  attemptHistory.push({ won, grid: userGrid.map(row=>[...row]) });
+
+  document.querySelectorAll('.cell:not(.given)').forEach(el => {
+    el.classList.remove('conflict','highlight','selected');
+    const r = +el.dataset.r, c = +el.dataset.c;
+    el.classList.add(userGrid[r][c] === puzzle.solution[r][c] ? 'correct' : 'conflict');
+  });
+
+  updateDots();
+  saveState();
+  selectedCell = null;
+
+  if (won) {
+    setTimeout(() => endGame(true), 500);
+  } else if (attemptsUsed >= MAX_ATTEMPTS) {
+    setTimeout(() => {
+      document.querySelectorAll('.cell:not(.given)').forEach(el => {
+        const r = +el.dataset.r, c = +el.dataset.c;
+        el.classList.remove('conflict','correct');
+        el.classList.add('given');
+        el.textContent = puzzle.solution[r][c];
+      });
+      refreshIneqColors();
+      endGame(false);
+    }, 800);
+  } else {
+    const left = MAX_ATTEMPTS - attemptsUsed;
+    flash(`Hay errores — ${left} intento${left!==1?'s':''} restante${left!==1?'s':''}`);
+    refreshIneqColors();
+  }
+}
+
+function isSolved() {
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++)
+      if (!puzzle.givens[`${r},${c}`] && userGrid[r][c] !== puzzle.solution[r][c]) return false;
+  return true;
+}
+
+function flash(msg) {
+  const el = document.getElementById('status-bar');
+  el.textContent = msg;
+  setTimeout(() => el.textContent = '', 2500);
+}
+
+// ══════════════════════════════════════════════════════════
+// END GAME
+// ══════════════════════════════════════════════════════════
+function endGame(won) {
+  gameOver = true;
+  stopTimer();
+  document.getElementById('btn-check').disabled = true;
+  saveState();
+  _shareStr = buildShareStr(won);
+  setTimeout(() => showResult(won), 600);
+}
+
+function buildShareStr(won) {
+  const header = `FutoMini ${todayKey}`;
+  const res = won
+    ? `✅ Resuelto en ${attemptsUsed}/${MAX_ATTEMPTS} intento${attemptsUsed!==1?'s':''} · ${formatTime(timerSecs)}`
+    : `❌ Sin resolver (${MAX_ATTEMPTS}/${MAX_ATTEMPTS} intentos) · ${formatTime(timerSecs)}`;
+  const last = attemptHistory.length ? attemptHistory[attemptHistory.length-1] : null;
+  let grid = '';
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const key = `${r},${c}`;
+      if (puzzle.givens[key]) { grid += '⬜'; continue; }
+      if (!last) { grid += '⬛'; continue; }
+      grid += last.grid[r][c] === puzzle.solution[r][c] ? '🟩' : '🟥';
+    }
+    grid += '\n';
+  }
+  return `${header}\n${res}\n\n${grid.trim()}`;
+}
+
+function showResult(won) {
+  document.getElementById('r-emoji').textContent = won ? '🎉' : '😔';
+  document.getElementById('r-title').textContent = won ? '¡Resuelto!' : 'Mañana será';
+  document.getElementById('r-sub').textContent   = won ? 'Futoshiki completado' : 'Se ha revelado la solución';
+  document.getElementById('r-stat').textContent  = won
+    ? `${attemptsUsed} intento${attemptsUsed!==1?'s':''} · ${formatTime(timerSecs)}`
+    : formatTime(timerSecs);
+  document.getElementById('r-share').textContent = _shareStr;
+  document.getElementById('next-puzzle-info').textContent = `Próximo puzzle en ${fmtCountdown(msToMidnight())}`;
+  document.getElementById('result-overlay').classList.add('show');
+}
+
+// ══════════════════════════════════════════════════════════
+// DOTS / TIMER / SHARE / COUNTDOWN
+// ══════════════════════════════════════════════════════════
+function updateDots() {
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const dot = document.getElementById(`dot-${i}`);
+    dot.className = 'dot';
+    if (i < attemptHistory.length) dot.classList.add(attemptHistory[i].won ? 'success' : 'used');
+  }
+  document.getElementById('attempts-label').textContent = gameOver ? 'FIN' : `INTENTO ${attemptsUsed+1} / ${MAX_ATTEMPTS}`;
+}
+
+function startTimer() {
+  if (timerStarted) return;
+  timerStarted = true;
+  timerInt = setInterval(() => {
+    timerSecs++;
+    document.getElementById('timer-display').textContent = formatTime(timerSecs);
+  }, 1000);
+}
+function stopTimer()   { clearInterval(timerInt); timerInt = null; }
+function formatTime(s) { const m=Math.floor(s/60),ss=s%60; return `${m}:${String(ss).padStart(2,'0')}`; }
+
+function copyShare() {
+  const text = _shareStr || document.getElementById('locked-share').textContent;
+  const flash = () => document.querySelectorAll('.share-btn').forEach(b => {
+    const o=b.textContent; b.textContent='¡Copiado! ✓'; setTimeout(()=>b.textContent=o,2000);
+  });
+  if (navigator.clipboard && window.isSecureContext)
+    navigator.clipboard.writeText(text).then(flash).catch(()=>fallbackCopy(text,flash));
+  else fallbackCopy(text, flash);
+}
+function fallbackCopy(text, cb) {
+  const ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); if(cb)cb(); } catch(e){ alert('Copia el texto manualmente.'); }
+  document.body.removeChild(ta);
+}
+
+function msToMidnight() { const n=new Date(),m=new Date(n); m.setHours(24,0,0,0); return m-n; }
+function fmtCountdown(ms) {
+  const t=Math.floor(ms/1000),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function startCountdown() {
+  const el=document.getElementById('countdown');
+  const tick=()=>el.textContent=fmtCountdown(msToMidnight());
+  tick(); setInterval(tick,1000);
+}
+
+// ══════════════════════════════════════════════════════════
+// LOCALSTORAGE
+// ══════════════════════════════════════════════════════════
+function saveState() {
+  const notesSerial = notes.map(row=>row.map(s=>[...s]));
+  localStorage.setItem('futomini_state', JSON.stringify({
+    date:todayKey, userGrid, attemptsUsed, attemptHistory, gameOver, timerSecs, notesSerial
+  }));
+}
+function loadState() {
+  try {
+    const s=JSON.parse(localStorage.getItem('futomini_state'));
+    return (s&&s.date===todayKey) ? s : null;
+  } catch(e){ return null; }
+}
+function restoreState(s) {
+  userGrid       = s.userGrid || userGrid;
+  attemptsUsed   = s.attemptsUsed || 0;
+  attemptHistory = s.attemptHistory || [];
+  gameOver       = s.gameOver || false;
+  timerSecs      = s.timerSecs || 0;
+  if (s.notesSerial) notes = s.notesSerial.map(row=>row.map(arr=>new Set(arr)));
+  document.getElementById('timer-display').textContent = formatTime(timerSecs);
+
+  for (let r=0; r<SIZE; r++)
+    for (let c=0; c<SIZE; c++) {
+      if (puzzle.givens[`${r},${c}`]) continue;
+      const el = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+      if (!el) continue;
+      if (userGrid[r][c]) el.textContent = userGrid[r][c];
+      else if (notes[r][c].size>0) renderNotes(r,c);
+    }
+
+  if (attemptHistory.length) {
+    const last = attemptHistory[attemptHistory.length-1];
+    document.querySelectorAll('.cell:not(.given)').forEach(el => {
+      el.classList.remove('conflict','correct');
+      const r=+el.dataset.r, c=+el.dataset.c;
+      const val=last.grid[r][c]; if (!val) return;
+      el.classList.add(val===puzzle.solution[r][c]?'correct':'conflict');
+    });
+    if (gameOver && !last.won) {
+      document.querySelectorAll('.cell:not(.given)').forEach(el => {
+        const r=+el.dataset.r, c=+el.dataset.c;
+        el.classList.remove('conflict','correct');
+        el.classList.add('given');
+        el.textContent=puzzle.solution[r][c];
+      });
+    }
+  }
+
+  updateDots();
+  refreshIneqColors();
+  if (gameOver) document.getElementById('btn-check').disabled=true;
+  else updateConflicts();
+}
+
+// ══════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  const now=new Date();
+  const y=now.getFullYear(), m=String(now.getMonth()+1).padStart(2,'0'), d=String(now.getDate()).padStart(2,'0');
+  todayKey=`${y}-${m}-${d}`;
+  document.getElementById('date-display').textContent =
+    now.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
+
+  document.getElementById('status-bar').textContent='⏳ Generando puzzle...';
+
+  setTimeout(()=>{
+    puzzle=generatePuzzle(todayKey);
+    document.getElementById('status-bar').textContent='';
+    renderGrid();
+    renderNumpad();
+    updateDots();
+
+    const saved=loadState();
+    if (saved&&saved.gameOver) {
+      restoreState(saved);
+      _shareStr=buildShareStr(saved.attemptHistory.some(a=>a.won));
+      document.getElementById('locked-share').textContent=_shareStr;
+      setTimeout(()=>{document.getElementById('locked-overlay').classList.add('show');startCountdown();},400);
+      return;
+    }
+    if (saved) restoreState(saved);
+  }, 30);
+});
+</script>
+</body>
+</html>
